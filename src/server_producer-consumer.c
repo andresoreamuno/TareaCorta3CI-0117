@@ -17,12 +17,14 @@
 
 #define DEFAULT_PORT 8080
 #define LISTEN_BACKLOG 64
-#define CAPACIDAD_COLA 100//Capacidad de la cola
+#define CAPACIDAD_COLA 2//Capacidad de la cola
 #define DEFAULT_CONSUMIDORES 4//Cantidad de consumidores por defecto
 
 static volatile sig_atomic_t g_running = 1;
 
 static unsigned long g_requests_served = 0;
+
+static pthread_mutex_t g_served_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 typedef struct {
     int file_descriptor;
@@ -51,7 +53,7 @@ static cola_connection_t g_cola = {
 static void encolar(cola_connection_t *cola, connection_t conn)
 {
     //bloquea el mutex
-    pthread_mutex_lock(%cola->mutex);
+    pthread_mutex_lock(&cola->mutex);
 
     //Espera no activa si la cola esta llena
     while (cola->cantidad == CAPACIDAD_COLA)
@@ -66,14 +68,14 @@ static void encolar(cola_connection_t *cola, connection_t conn)
     pthread_cond_signal(&cola->no_vacio);
     
     //libera el mutex
-    pthread_mutex_unlock(%cola->mutex);
+    pthread_mutex_unlock(&cola->mutex);
 
 }
 
-static int desencolar(cola_connection_t *cola, connection_t conn)
+static int desencolar(cola_connection_t *cola, connection_t *conn)
 {
     //bloquea el mutex
-    pthread_mutex_lock(%cola->mutex);
+    pthread_mutex_lock(&cola->mutex);
 
     while (cola->cantidad==0 && g_running)
     {
@@ -83,7 +85,7 @@ static int desencolar(cola_connection_t *cola, connection_t conn)
 
     //Si no hay items en cola libera mutex y retorna 0 (programa cerrando)
     if (cola->cantidad == 0){
-        pthread_mutex_unlock(%cola->mutex);
+        pthread_mutex_unlock(&cola->mutex);
         return 0;
     }
 
@@ -135,23 +137,28 @@ static void *handle_connection(void *arg)
 {
     connection_t *conn = arg;
 
-    printf("[Handling connection %lu] accepted\n", conn->connection_id);
-    fflush(stdout);
+    //printf("[Handling connection %lu] accepted\n", conn->connection_id);
+    //fflush(stdout);
 
     if (nu_drain_request(conn->file_descriptor) > 0) //Si lee peticion ok
     {
         (void)nu_send_response(conn->file_descriptor, conn->connection_id);
     }
+    
+    //mutex para evitar condicion de carrera al actualizar solicitudes atendidas
+    pthread_mutex_lock(&g_served_mutex);
+    g_requests_served++;
+    pthread_mutex_unlock(&g_served_mutex);
 
-    unsigned long current = g_requests_served;
-    sched_yield();
-    g_requests_served = current + 1;
+    //unsigned long current = g_requests_served;
+    //sched_yield();
+    //g_requests_served = current + 1;
 
     if (close(conn->file_descriptor) < 0)
         perror("close(file_descriptor)");
 
     //free(conn);
-    //return NULL;
+    return NULL;
 
 }
 
@@ -225,14 +232,14 @@ int main(int argc, char **argv)
     //Inicializa hilos consumidores
     pthread_t *consumidores = calloc((size_t)cant_consumidores, sizeof *consumidores);
 
-    if (consumidores = NULL){
+    if (consumidores == NULL){
         fprintf(stderr, "out of memory\n");
         close(listen_file_descriptor);
         return EXIT_FAILURE;
     }
 
     for (long i = 0; i < cant_consumidores; i++){
-       int pthread_created = pthread_create(&thread_id, NULL, handle_connection, conn); 
+       int pthread_created = pthread_create(&consumidores[i], NULL, consumidor, NULL); 
 
        if (pthread_created != 0)
         {
@@ -264,7 +271,7 @@ int main(int argc, char **argv)
         connection_t conn;
 
         conn.file_descriptor = client_file_descriptor;
-        conn.connection_id = accepted++;
+        conn.connection_id = ++accepted;
         encolar(&g_cola, conn);
 
         //connection_t *conn = malloc(sizeof(connection_t));

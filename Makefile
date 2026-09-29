@@ -19,17 +19,14 @@ CPPFLAGS ?= -I$(INC_DIR) -MMD -MP
 # net_util is linked into both servers but not into the client.
 COMMON_OBJ := $(BUILD_DIR)/net_util.o
 
-PROGRAMS := server_unsafe server_safe load_client
+PROGRAMS := server_producer-consumer load_client
 BINARIES := $(addprefix $(BIN_DIR)/,$(PROGRAMS))
 
 .PHONY: all clean
 
 all: $(BINARIES)
 
-$(BIN_DIR)/server_unsafe: $(BUILD_DIR)/server_unsafe.o $(COMMON_OBJ) | $(BIN_DIR)
-	$(CC) $(LDFLAGS) -o $@ $^
-
-$(BIN_DIR)/server_safe: $(BUILD_DIR)/server_safe.o $(COMMON_OBJ) | $(BIN_DIR)
+$(BIN_DIR)/server_producer-consumer: $(BUILD_DIR)/server_producer-consumer.o $(COMMON_OBJ) | $(BIN_DIR)
 	$(CC) $(LDFLAGS) -o $@ $^
 
 $(BIN_DIR)/load_client: $(BUILD_DIR)/load_client.o | $(BIN_DIR)
